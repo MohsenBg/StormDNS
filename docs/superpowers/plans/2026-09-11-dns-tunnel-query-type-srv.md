@@ -50,7 +50,7 @@
   - `ResourceRecord.RDataName` populated for SRV target names; `""` when n/a, root, or undecodable.
   - `isNameRDataRecordType` stays defined in this task (still used by `transport.go` until Task 2).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `internal/dnsparser/srv_test.go` (package `dnsparser`):
 
@@ -193,12 +193,12 @@ func TestParsePacketToleratesGarbageSRVTarget(t *testing.T) {
 
 Note: Task 2 appends tests to this same file and extends the import block with `"errors"` and `VpnProto "stormdns-go/internal/vpnproto"` in the same step.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/dnsparser/ -run 'TestParsePacketDecodesSRV|TestParsePacketToleratesShortSRV|TestParsePacketToleratesGarbageSRV' -v`
 Expected: FAIL — `TestParsePacketDecodesSRVTargetNamePlain` and `TestParsePacketDecodesSRVTargetAfterFixedFields` report empty `RDataName`; compressed and root/garbage/short cases may already pass (they assert empty/absence behavior).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `internal/dnsparser/parser.go`:
 
@@ -238,7 +238,7 @@ func nameRDataNameOffset(recordType uint16) int {
 ```
 Do **not** delete `isNameRDataRecordType` yet — `transport.go` still calls it until Task 2.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/dnsparser/ -run 'TestParsePacketDecodesSRV|TestParsePacketToleratesShortSRV|TestParsePacketToleratesGarbageSRV' -v`
 Expected: PASS (all 6).
@@ -247,7 +247,7 @@ Then package regression:
 Run: `go test ./internal/dnsparser/`
 Expected: PASS (NS/CNAME/TXT parser tests unchanged).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/dnsparser/parser.go internal/dnsparser/srv_test.go
@@ -277,7 +277,7 @@ git commit -m "feat: decode SRV target names in DNS parser"
   - `func decodeNameRDataUnit(answer ResourceRecord) ([]byte, bool)` — per-type unit decode incl. SRV fixed bytes + root target
   - `BuildVPNResponsePacket` dispatches SRV after CNAME; `extractAnswerUnits` uses `decodeNameRDataUnit`; `buildNSAnswerChunks` delegates to `buildNameAnswerUnits` (byte-identical behavior)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/dnsparser/srv_test.go` and extend its imports with `"errors"` and `VpnProto "stormdns-go/internal/vpnproto"` (final import block):
 
@@ -613,12 +613,12 @@ func TestExtractVPNResponseIgnoresRecordsAppendedToSRV(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/dnsparser/ -run 'TestSRVUnitCapacity|TestBuildSRV|TestDecodeNameRDataUnit|TestBuildVPNResponsePacketMirrorsSRV|TestSRVAnswerRoundTrip|TestExtractVPNResponseReadsSRV|TestExtractVPNResponseNoPayloadFromUnreadableSRV|TestExtractVPNResponseIgnoresRecordsAppendedToSRV|TestBuildSRVVPNResponseShortFrame' -v`
 Expected: FAIL to compile — `undefined: maxSRVUnitBytes`, `undefined: buildSRVAnswerRData`, `undefined: decodeNameRDataUnit`, `undefined: buildSingleSRVResponsePacket`, `undefined: buildSRVVPNResponse`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `internal/dnsparser/transport.go`:
 
@@ -977,7 +977,7 @@ and update the `extractAnswerUnits` doc comment to say "NS, CNAME, or SRV" inste
 
 11. In `internal/dnsparser/parser.go`, delete the now-unused `isNameRDataRecordType` function (verify with `rg -n "isNameRDataRecordType" internal/` — expected: no matches).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/dnsparser/ -run 'TestSRVUnitCapacity|TestBuildSRV|TestDecodeNameRDataUnit|TestBuildVPNResponsePacketMirrorsSRV|TestSRVAnswerRoundTrip|TestExtractVPNResponseReadsSRV|TestExtractVPNResponseNoPayloadFromUnreadableSRV|TestExtractVPNResponseIgnoresRecordsAppendedToSRV|TestBuildSRVVPNResponseShortFrame' -v`
 Expected: PASS (all 13).
@@ -986,7 +986,7 @@ Then full package regression (NS/CNAME/TXT):
 Run: `go test ./internal/dnsparser/`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/dnsparser/transport.go internal/dnsparser/parser.go internal/dnsparser/srv_test.go
@@ -1005,7 +1005,7 @@ git commit -m "feat: SRV tunnel answers (fixed-byte payload channel + name extra
 - Consumes: existing `litePacketWithQuestion` test helper.
 - Produces: `Matcher.Match` returns `ActionProcess` for SRV questions with valid labels; other qtypes keep `Reason: "unsupported-qtype"`. `internal/dnsparser/policy.go` already accepts SRV — no change.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/domainmatcher/matcher_test.go`:
 
@@ -1023,12 +1023,12 @@ func TestMatcherReturnsProcessForSRVQuestion(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/domainmatcher/ -run TestMatcherReturnsProcessForSRVQuestion -v`
 Expected: FAIL — action `ActionNoData`, reason `unsupported-qtype`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `internal/domainmatcher/matcher.go`, extend the qtype gate:
 ```go
@@ -1045,12 +1045,12 @@ In `internal/domainmatcher/matcher.go`, extend the qtype gate:
 	}
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/domainmatcher/ -v`
 Expected: PASS (new + all existing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/domainmatcher/matcher.go internal/domainmatcher/matcher_test.go
@@ -1070,7 +1070,7 @@ git commit -m "feat: accept SRV qtype as tunnel query"
 **Interfaces:**
 - Produces: `DNS_QUERY_TYPE` accepts `"TXT"` (default), `"NS"`, `"CNAME"`, `"SRV"`, `"ROTATE"`; anything else → error `invalid DNS_QUERY_TYPE: %q`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/config/client_test.go` (uses the existing `writeClientConfigForTest` helper):
 
@@ -1088,12 +1088,12 @@ DOMAINS = ["v.domain.com"]
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/config/ -run TestClientConfigDNSQueryTypeNormalizesSRV -v`
 Expected: FAIL — `invalid DNS_QUERY_TYPE: "SRV"`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 1. In `internal/config/client.go`, extend the validation switch:
 ```go
@@ -1128,12 +1128,12 @@ DNS_QUERY_TYPE = "TXT"
 If tunnel queries never get answers while normal lookups work, some resolver or middlebox in your path may block or mangle TXT queries/answers. Switch the client to NS, CNAME, or SRV queries (see `DNS_QUERY_TYPE` under [DNS Delegation Details](#dns-delegation-details)); the same delegation records work unchanged. These modes need a server that mirrors the question type, so update the server first.
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/config/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/config/client.go internal/config/client_test.go client_config.toml.simple README.MD
@@ -1152,7 +1152,7 @@ git commit -m "feat: accept SRV in DNS_QUERY_TYPE client config"
 - Consumes: Task 4 `cfg.DNSQueryType`.
 - Produces: `func (c *Client) pickTunnelQueryType() uint16` — `TXT`→16, `NS`→2, `CNAME`→5, `SRV`→33, `ROTATE`→uniform random over the four (`math/rand`), empty/unknown → 16. All question-building callers unchanged.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `internal/client/tunnel_query_test.go`:
 
@@ -1202,12 +1202,12 @@ func TestBuildTunnelQuestionBytesUsesSRVMode(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/client/ -run 'TestPickTunnelQueryTypeSRVMode|TestPickTunnelQueryTypeRotateMix|TestBuildTunnelQuestionBytesUsesSRVMode' -v`
 Expected: FAIL — SRV mode picks TXT; ROTATE never sees SRV; packet qtype is TXT.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `internal/client/tunnel_query.go`, replace `pickTunnelQueryType`:
 ```go
@@ -1246,7 +1246,7 @@ func (c *Client) pickTunnelQueryType() uint16 {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/client/ -run 'TestPickTunnelQueryType|TestBuildTunnelQuestionBytesUses' -v`
 Expected: PASS.
@@ -1255,7 +1255,7 @@ Then client package regression:
 Run: `go test ./internal/client/`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/client/tunnel_query.go internal/client/tunnel_query_test.go
@@ -1272,7 +1272,7 @@ git commit -m "feat: per-query tunnel DNS type selection (TXT/NS/CNAME/SRV/ROTAT
 **Interfaces:**
 - Consumes: everything above via public API (`BuildVPNResponsePacket`, `ExtractVPNResponse`, `Matcher`, `Server.handleMTUDownRequest`). Reuses `patternBytes` and the `Server` fixture style already in `cname_tunnel_test.go` (same package).
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Create `internal/udpserver/srv_tunnel_test.go`:
 
@@ -1376,12 +1376,12 @@ func TestSRVTunnelQueryAcceptedEndToEnd(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it passes**
+- [x] **Step 2: Run test to verify it passes**
 
 Run: `go test ./internal/udpserver/ -run TestSRVTunnelQueryAcceptedEndToEnd -v`
 Expected: PASS (integration gate; if it fails, debug per systematic-debugging — most likely a framing mismatch caught only by cross-package use).
 
-- [ ] **Step 3: Full verification**
+- [x] **Step 3: Full verification**
 
 Run:
 ```bash
@@ -1393,11 +1393,11 @@ go test -race ./internal/dnsparser/ ./internal/domainmatcher/ ./internal/config/
 ```
 Expected: all PASS.
 
-- [ ] **Step 4: Manual smoke (optional, environment permitting)**
+- [x] **Step 4: Manual smoke (optional, environment permitting)**
 
 `go run scripts/bench/bench.go` runs a local server+client; do one TXT run (regression). For an SRV smoke, temporarily set `DNS_QUERY_TYPE = "SRV"` in the bench's client config before running — confirm throughput > 0 and no `ErrTXTAnswerMissing` storms. Not required for merge.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/udpserver/srv_tunnel_test.go
@@ -1412,3 +1412,21 @@ git commit -m "test: SRV tunnel query acceptance end to end"
 - **No placeholders:** every step has concrete code, exact insertion points, and runnable verification with expected outcomes.
 - **Type consistency:** `nameRDataNameOffset`, `maxSRVUnitBytes`, `buildNameAnswerUnits`, `buildSRVAnswerRData`, `buildSRVAnswerChunks`, `questionTypeIsSRV`, `buildSRVVPNResponse`, `buildSingleSRVResponsePacket`, `BuildSRVResponsePacket`, `decodeNameRDataUnit` are named and typed identically across tasks. Existing exported names unchanged. Test helpers `buildSRVAnswerTestPacket`, `srvRData`, `patternedPayload`, `splitLabels`, `vpnPacketForTest` (dnsparser), `patternBytes` (udpserver), `writeClientConfigForTest` (config), `litePacketWithQuestion` (domainmatcher), `questionTypeOf` (client) are defined in their packages and reused, never redefined.
 - **Edge case in the plan:** Task 1's note about imports keeps the new test file compiling before Task 2 appends the tests that use `errors`/`VpnProto`.
+
+---
+
+## Execution Notes (as built)
+
+All six tasks complete. Commits: `43cb242` (parser), `207844f` (transport/extraction), `b7594cb` (matcher), `67c8020` (config+docs), `dbe7466` (client picker + 4-way ROTATE), `be67665` (udpserver e2e).
+
+Deviations from the written steps, all reflected in the committed code and tests:
+
+1. **Root name representation.** `parseName` returns `"."` for the DNS root (`if !hasLabel { return ".", ... }`), not `""` — the spec's decision 6 wording assumed `""`. Extraction uses `isRootRDataName(name)` which accepts both `""` (unset/undecodable) and `"."` (root). The Task 1 root test asserts `got != "" && got != "."`, and `decodeNameRDataUnit` only treats an SRV root target as a six-byte unit when the rdata is exactly `len == 7 && RData[6] == 0`.
+2. **Task 6 owner assertion.** The plan snippet compared SRV owners to the base tunnel name `abc.v.example.com`; the real question name is `q3f2abc.abc.v.example.com` (payload labels + base domain), which is what the server mirrors. The committed test asserts every SRV answer owns `parsed.Questions[0].Name` (the echoed question name), which is the NS-style invariant.
+
+Environment limits observed while verifying:
+
+- `go test -race` cannot run on this Windows host (no gcc/cgo). All packages pass without `-race`; CI on Linux should run the race command from Task 6 Step 3.
+- `gofmt -l` flags files repo-wide because of pre-existing UTF-8 BOM + CRLF working-tree endings. Per-file verification used `gofmt <file>` compared against the LF/BOM-normalized file: all touched files are format-clean except `internal/config/client.go`, whose 224-line struct-alignment diff predates this work (228 diff lines before the change) and is out of scope.
+- SRV `gofmt` gate result: `internal/dnsparser/{transport,parser,srv_test}.go`, `internal/domainmatcher/{matcher,matcher_test}.go`, `internal/config/client_test.go`, `internal/client/tunnel_query{.go,_test.go}`, `internal/udpserver/srv_tunnel_test.go` all clean.
+- Verification evidence: `go vet ./...` clean; `go build ./cmd/client && go build ./cmd/server` OK; `go test -timeout 300s ./...` → 17 packages `ok`; `internal/dnsparser` 61 tests pass including the 601-size chunk-boundary barrage; `TestSRVTunnelQueryAcceptedEndToEnd` passes.
