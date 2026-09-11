@@ -359,7 +359,7 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 	switch cfg.DNSQueryType {
 	case "", "TXT":
 		cfg.DNSQueryType = "TXT"
-	case "NS", "CNAME", "ROTATE":
+	case "NS", "CNAME", "SRV", "ROTATE":
 	default:
 		return cfg, fmt.Errorf("invalid DNS_QUERY_TYPE: %q", cfg.DNSQueryType)
 	}

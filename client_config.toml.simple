@@ -206,7 +206,8 @@ BASE_ENCODE_DATA = false
 #   "TXT"    - default, works with every server version
 #   "NS"     - tunnel over NS queries/answers; use when the resolver path blocks TXT
 #   "CNAME"  - tunnel over CNAME query/answer chains; the most web-like query shape
-#   "ROTATE" - random TXT/NS/CNAME mix per query (disguise); requires a matching server
+#   "SRV"    - tunnel over SRV queries/answers; use when the other types are filtered
+#   "ROTATE" - random TXT/NS/CNAME/SRV mix per query (disguise); requires a matching server
 DNS_QUERY_TYPE = "TXT"
 
 # ------------------------------------------------------------------------------
