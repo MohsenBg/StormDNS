@@ -222,12 +222,6 @@ func nameRDataNameOffset(recordType uint16) int {
 	}
 }
 
-// isNameRDataRecordType reports whether a record type carries a domain name
-// as its rdata (a wire-format name, possibly a compression pointer).
-func isNameRDataRecordType(recordType uint16) bool {
-	return recordType == Enums.DNS_RECORD_TYPE_NS || recordType == Enums.DNS_RECORD_TYPE_CNAME
-}
-
 func parseResourceRecords(data []byte, offset int, count int) ([]ResourceRecord, int, error) {
 	if count == 0 {
 		return nil, offset, nil
