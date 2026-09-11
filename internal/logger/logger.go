@@ -138,7 +138,7 @@ func (l *Logger) logf(level int, format string, args ...any) {
 		}
 	}
 
-	if l.consoleWriter != nil {
+	if l.consoleWriter != nil && !discard.Load() {
 		appName := l.appNameText
 		levelText := plainLevelTexts[level]
 		finalMsg := plainMsg
