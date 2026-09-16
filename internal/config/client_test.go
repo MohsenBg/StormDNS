@@ -486,3 +486,15 @@ DOMAINS = ["v.domain.com"]
 		t.Fatalf("DNSQueryType = %q, want %q", cfg.DNSQueryType, "CNAME")
 	}
 }
+
+func TestClientConfigDNSQueryTypeNormalizesSRV(t *testing.T) {
+	cfg := writeClientConfigForTest(t, `
+DNS_QUERY_TYPE = "srv"
+DATA_ENCRYPTION_METHOD = 1
+ENCRYPTION_KEY = "secret"
+DOMAINS = ["v.domain.com"]
+`)
+	if cfg.DNSQueryType != "SRV" {
+		t.Fatalf("DNSQueryType = %q, want %q", cfg.DNSQueryType, "SRV")
+	}
+}

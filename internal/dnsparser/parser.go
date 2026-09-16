@@ -57,7 +57,7 @@ type ResourceRecord struct {
 	TTL       uint32
 	RDLen     uint16
 	RData     []byte
-	RDataName string // decoded rdata name for name-type records (NS/CNAME); "" when n/a or undecodable
+	RDataName string // decoded rdata name for name-type records (NS/CNAME at offset 0, SRV target at offset 6); "" when n/a, root, or undecodable
 }
 
 type Packet struct {
@@ -207,10 +207,19 @@ func parseQuestions(data []byte, offset int, count int) ([]Question, int, error)
 	return questions, offset, nil
 }
 
-// isNameRDataRecordType reports whether a record type carries a domain name
-// as its rdata (a wire-format name, possibly a compression pointer).
-func isNameRDataRecordType(recordType uint16) bool {
-	return recordType == Enums.DNS_RECORD_TYPE_NS || recordType == Enums.DNS_RECORD_TYPE_CNAME
+// nameRDataNameOffset returns the offset of the domain name inside the rdata
+// for record types whose rdata carries a name: NS and CNAME start at offset 0;
+// SRV starts after the 6-byte priority/weight/port prefix. Returns -1 when the
+// rdata holds no name.
+func nameRDataNameOffset(recordType uint16) int {
+	switch recordType {
+	case Enums.DNS_RECORD_TYPE_NS, Enums.DNS_RECORD_TYPE_CNAME:
+		return 0
+	case Enums.DNS_RECORD_TYPE_SRV:
+		return 6
+	default:
+		return -1
+	}
 }
 
 func parseResourceRecords(data []byte, offset int, count int) ([]ResourceRecord, int, error) {
@@ -250,12 +259,13 @@ func parseResourceRecords(data []byte, offset int, count int) ([]ResourceRecord,
 			RData: data[offset:end],
 		}
 
-		// NS and CNAME rdata are domain names (possibly compression pointers).
-		// Decode them so tunnel payloads carried in those names can be read. A
-		// decode failure (or a name that overruns rdLen) leaves RDataName empty
-		// and never fails the whole packet parse.
-		if isNameRDataRecordType(rType) {
-			if nameText, nameNext, nameErr := parseName(data, offset); nameErr == nil && nameNext <= end {
+		// NS/CNAME rdata is a domain name starting at offset 0; SRV rdata
+		// carries its target name after the 6-byte priority/weight/port
+		// prefix. Decode it so tunnel payloads carried in those names can be
+		// read. A decode failure (or a name that overruns rdLen) leaves
+		// RDataName empty and never fails the whole packet parse.
+		if nameOffset := nameRDataNameOffset(rType); nameOffset >= 0 && offset+nameOffset < end {
+			if nameText, nameNext, nameErr := parseName(data, offset+nameOffset); nameErr == nil && nameNext <= end {
 				records[i].RDataName = nameText
 			}
 		}

@@ -24,8 +24,8 @@ type preparedTunnelDomain struct {
 }
 
 // pickTunnelQueryType returns the DNS record type for the next tunnel query
-// based on the configured mode: TXT (default), NS, CNAME, or ROTATE (uniform
-// random).
+// based on the configured mode: TXT (default), NS, CNAME, SRV, or ROTATE
+// (uniform random over the four).
 func (c *Client) pickTunnelQueryType() uint16 {
 	mode := "TXT"
 	if c != nil {
@@ -39,14 +39,18 @@ func (c *Client) pickTunnelQueryType() uint16 {
 		return Enums.DNS_RECORD_TYPE_NS
 	case "CNAME":
 		return Enums.DNS_RECORD_TYPE_CNAME
+	case "SRV":
+		return Enums.DNS_RECORD_TYPE_SRV
 	case "ROTATE":
-		switch rand.Intn(3) {
+		switch rand.Intn(4) {
 		case 0:
 			return Enums.DNS_RECORD_TYPE_TXT
 		case 1:
 			return Enums.DNS_RECORD_TYPE_NS
-		default:
+		case 2:
 			return Enums.DNS_RECORD_TYPE_CNAME
+		default:
+			return Enums.DNS_RECORD_TYPE_SRV
 		}
 	default:
 		return Enums.DNS_RECORD_TYPE_TXT
