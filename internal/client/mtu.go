@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // StormDNS
 // Author: nullroute1970
 // Github: https://github.com/nullroute1970/StormDNS
@@ -73,6 +73,11 @@ type mtuScanCounters struct {
 
 // RunInitialMTUTests tests all connections before the client starts.
 func (c *Client) RunInitialMTUTests(ctx context.Context) error {
+	if c.autoQueryEnabled() {
+		c.autoQueryMu.Lock()
+		c.autoQueryStates = make(map[string]*autoQueryState)
+		c.autoQueryMu.Unlock()
+	}
 	if len(c.connections) == 0 {
 		return ErrNoValidConnections
 	}
@@ -172,6 +177,10 @@ func (c *Client) prepareConnectionMTUScanState(conn *Connection) {
 	conn.UploadMTUChars = 0
 	conn.DownloadMTUBytes = 0
 	conn.MTUResolveTime = 0
+	if c.autoQueryEnabled() {
+		conn.TunnelQueryType = 0
+		conn.QueryTypeGeneration = 0
+	}
 }
 
 func (c *Client) runConnectionMTUTest(ctx context.Context, conn *Connection, serverID int, total int, maxUploadPayload int, counters *mtuScanCounters) {
@@ -282,6 +291,9 @@ func (c *Client) runConnectionMTUTest(ctx context.Context, conn *Connection, ser
 }
 
 func (c *Client) probeConnectionMTU(ctx context.Context, conn *Connection, maxUploadPayload int) (mtuConnectionProbeResult, mtuRejectReason) {
+	if c.autoQueryEnabled() && conn.TunnelQueryType == 0 {
+		return c.discoverAutoQueryType(ctx, conn, maxUploadPayload)
+	}
 	var result mtuConnectionProbeResult
 
 	probeTransport, err := newUDPQueryTransport(conn.ResolverLabel)
@@ -290,6 +302,10 @@ func (c *Client) probeConnectionMTU(ctx context.Context, conn *Connection, maxUp
 		return result, mtuRejectUpload
 	}
 	defer probeTransport.conn.Close()
+	if c.autoQueryEnabled() {
+		stop := context.AfterFunc(ctx, func() { probeTransport.conn.Close() })
+		defer stop()
+	}
 
 	upOK, upBytes, upChars, upRTT, err := c.testUploadMTU(ctx, conn, probeTransport, maxUploadPayload)
 	if err != nil || !upOK {
@@ -495,13 +511,13 @@ func (c *Client) sendUploadMTUProbe(ctx context.Context, conn *Connection, probe
 		return false, 0, err
 	}
 
-	query, err := c.buildMTUProbeQuery(conn.Domain, Enums.PACKET_MTU_UP_REQ, payload)
+	query, err := c.buildMTUProbeQuery(conn.Domain, Enums.PACKET_MTU_UP_REQ, payload, c.tunnelQueryType(*conn))
 	if err != nil {
 		return false, 0, nil
 	}
 
 	startedAt := time.Now()
-	response, err := c.exchangeUDPQuery(probeTransport, query, c.mtuTestTimeout)
+	response, err := c.exchangeUDPQuery(probeTransport, query, c.autoProbeTimeout())
 	if err != nil {
 		c.logMTUProbe(
 			options.IsRetry,
@@ -515,6 +531,9 @@ func (c *Client) sendUploadMTUProbe(ctx context.Context, conn *Connection, probe
 	}
 	rtt := time.Since(startedAt)
 
+	if !c.autoDNSResponseOK(response) {
+		return false, 0, nil
+	}
 	packet, err := DnsParser.ExtractVPNResponse(response, useBase64)
 	if err != nil {
 		c.logMTUProbe(
@@ -609,13 +628,13 @@ func (c *Client) sendDownloadMTUProbe(ctx context.Context, conn *Connection, pro
 	}
 	binary.BigEndian.PutUint16(payload[1+mtuProbeCodeLength:1+mtuProbeCodeLength+2], uint16(effectiveDownloadSize))
 
-	query, err := c.buildMTUProbeQuery(conn.Domain, Enums.PACKET_MTU_DOWN_REQ, payload)
+	query, err := c.buildMTUProbeQuery(conn.Domain, Enums.PACKET_MTU_DOWN_REQ, payload, c.tunnelQueryType(*conn))
 	if err != nil {
 		return false, 0, nil
 	}
 
 	startedAt := time.Now()
-	response, err := c.exchangeUDPQuery(probeTransport, query, c.mtuTestTimeout)
+	response, err := c.exchangeUDPQuery(probeTransport, query, c.autoProbeTimeout())
 	if err != nil {
 		c.logMTUProbe(
 			options.IsRetry,
@@ -629,6 +648,9 @@ func (c *Client) sendDownloadMTUProbe(ctx context.Context, conn *Connection, pro
 	}
 	rtt := time.Since(startedAt)
 
+	if !c.autoDNSResponseOK(response) {
+		return false, 0, nil
+	}
 	packet, err := DnsParser.ExtractVPNResponse(response, useBase64)
 	if err != nil {
 		c.logMTUProbe(
@@ -709,7 +731,7 @@ func (c *Client) sendDownloadMTUProbe(ctx context.Context, conn *Connection, pro
 	return ok, rtt, nil
 }
 
-func (c *Client) buildMTUProbeQuery(domain string, packetType uint8, payload []byte) ([]byte, error) {
+func (c *Client) buildMTUProbeQuery(domain string, packetType uint8, payload []byte, queryTypes ...uint16) ([]byte, error) {
 	return c.buildTunnelTXTQueryRaw(domain, VpnProto.BuildOptions{
 		SessionID:      255,
 		PacketType:     packetType,
@@ -718,7 +740,7 @@ func (c *Client) buildMTUProbeQuery(domain string, packetType uint8, payload []b
 		FragmentID:     0,
 		TotalFragments: 1,
 		Payload:        payload,
-	})
+	}, queryTypes...)
 }
 
 func (c *Client) maxUploadMTUPayload(domain string) int {

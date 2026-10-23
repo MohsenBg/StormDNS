@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // StormDNS
 // Author: nullroute1970
 // Github: https://github.com/nullroute1970/StormDNS
@@ -483,6 +483,11 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 	}
 
 	var packetByDomain map[string][]byte
+	type autoPacketKey struct {
+		domain    string
+		queryType uint16
+	}
+	var autoPackets map[autoPacketKey][]byte
 	var preparedDomainByName map[string]preparedTunnelDomain
 	var frames []encodedOutboundDatagram
 	for {
@@ -521,6 +526,7 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 				clear(preparedDomainByName)
 			}
 			frames = frames[:0]
+			clear(autoPackets)
 
 			for _, resolverConn := range task.conns {
 				domain := resolverConn.Domain
@@ -530,6 +536,28 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 
 				addr, err := c.getResolverUDPAddr(resolverConn)
 				if err != nil {
+					continue
+				}
+				if c.autoQueryEnabled() {
+					// Tasks may outlive a selection change. Use the latest complete
+					// snapshot, and retain its generation through the writer queue.
+					current, ok := c.GetConnectionByKey(resolverConn.Key)
+					if !ok || !current.IsValid || current.TunnelQueryType == 0 {
+						continue
+					}
+					key := autoPacketKey{domain, current.TunnelQueryType}
+					dnsPacket, cached := autoPackets[key]
+					if !cached {
+						dnsPacket, err = c.buildTunnelQuestionBytes(domain, encoded, current.TunnelQueryType)
+						if err != nil {
+							continue
+						}
+						if autoPackets == nil {
+							autoPackets = make(map[autoPacketKey][]byte)
+						}
+						autoPackets[key] = dnsPacket
+					}
+					frames = append(frames, encodedOutboundDatagram{addr: addr, serverKey: current.Key, packet: dnsPacket, queryGeneration: current.QueryTypeGeneration})
 					continue
 				}
 
@@ -636,9 +664,18 @@ func (c *Client) asyncWriterWorker(ctx context.Context, id int, conn *net.UDPCon
 				if frame.addr == nil || len(frame.packet) == 0 {
 					continue
 				}
+				if c.autoQueryEnabled() {
+					// Register before sending so a fast response cannot beat its
+					// pending sample and later become a false timeout.
+					c.trackResolverSend(frame.packet, frame.addr.String(), localAddr, frame.serverKey, now, frame.queryGeneration)
+				}
 				if _, err := conn.WriteToUDP(frame.packet, frame.addr); err == nil {
-					c.trackResolverSend(frame.packet, frame.addr.String(), localAddr, frame.serverKey, now)
+					if !c.autoQueryEnabled() {
+						c.trackResolverSend(frame.packet, frame.addr.String(), localAddr, frame.serverKey, now)
+					}
 					c.txTotalBytes.Add(uint64(len(frame.packet)))
+				} else if c.autoQueryEnabled() {
+					c.trackResolverFailure(frame.packet, frame.addr, localAddr, now)
 				}
 			}
 			if !task.wasPacked && task.selected != nil {
@@ -719,11 +756,19 @@ func (c *Client) asyncProcessorWorker(ctx context.Context, id int) {
 
 // handleInboundPacket is the central entry point for all received tunnel packets.
 func (c *Client) handleInboundPacket(data []byte, addr *net.UDPAddr, localAddr string) {
+	if !c.autoDNSResponseOK(data) {
+		c.trackResolverFailure(data, addr, localAddr, time.Now())
+		return
+	}
 	// c.log.Debugf("Inbound packet from %v (%d bytes)", addr, len(data))
 
 	// 1. Extract VPN Packet from DNS Response
 	vpnPacket, err := DnsParser.ExtractVPNResponse(data, c.responseMode == mtuProbeBase64Reply)
 	if err != nil {
+		if c.autoQueryEnabled() {
+			c.trackResolverFailure(data, addr, localAddr, time.Now())
+			return
+		}
 		if errors.Is(err, DnsParser.ErrTXTAnswerMissing) {
 			receivedAt := time.Now()
 			if parsed, parseErr := DnsParser.ParsePacketLite(data); parseErr == nil && parsed.Header.RCode != 0 {

@@ -208,7 +208,78 @@ BASE_ENCODE_DATA = false
 #   "CNAME"  - tunnel over CNAME query/answer chains; the most web-like query shape
 #   "SRV"    - tunnel over SRV queries/answers; use when the other types are filtered
 #   "RANDOM" - random TXT/NS/CNAME/SRV mix per query (disguise); requires a matching server
+#   "AUTO"   - test each domain/resolver path and select its most reliable type;
+#              compare estimated speed on ties and periodically recheck (below)
 DNS_QUERY_TYPE = "TXT"
+
+# AUTO query-type policy. Used only when DNS_QUERY_TYPE = "AUTO".
+# All numeric limits below are validated; invalid values produce a config error.
+#
+# AUTO compares these types separately for each domain/resolver
+# pair, prioritize reliability, then compare estimated transfer speed.
+# Startup always performs a full comparison before connecting, including when
+# STARTUP_MODE = "logs". MTU bounds, discovery retries, and startup parallelism
+# come from MIN/MAX_*_MTU and MTU_TEST_* for the selected startup mode (section 6).
+
+# Allowed candidates: TXT, NS, CNAME, SRV; at least one is required.
+# Names are trimmed/uppercased and duplicates removed. Order breaks score ties.
+DNS_AUTO_QUERY_TYPES = ["TXT", "NS", "CNAME", "SRV"]
+
+# Independent upload/download test rounds per candidate. Range: [1, 100].
+# A round succeeds only when both directions pass; rounds are not retried.
+DNS_AUTO_PROBE_COUNT = 5
+
+# Timeout per probe in seconds. Range: [0, 600].
+# 0 inherits the active MTU_TEST_TIMEOUT_* value for the selected startup mode.
+DNS_AUTO_PROBE_TIMEOUT_SECONDS = 0.0
+
+# Minimum successful-round percentage to consider a candidate. Range: (0, 100].
+# For example, 20% with 5 rounds requires at least 1 successful round;
+# 70% with 5 rounds requires at least 4. Applies to switch confirmation too.
+DNS_AUTO_MIN_SUCCESS_PERCENT = 20.0
+
+# Extra independent rounds to confirm a proposed switch. Range: [0, 100].
+# 0 disables this extra confirmation; the initial candidate tests still run.
+DNS_AUTO_SWITCH_CONFIRMATION_COUNT = 5
+
+# Required speed improvement when candidates have equal reliability.
+# Range: [0, 1000] percent. 0 accepts any strictly positive improvement.
+DNS_AUTO_MIN_SPEED_IMPROVEMENT_PERCENT = 20.0
+
+# Enable periodic comparison on healthy paths. Disabling this does not disable
+# failure-triggered rechecks or the initial comparison.
+DNS_AUTO_RECHECK_ENABLED = true
+
+# Base periodic interval per path in seconds. Range: [60, 86400].
+# Default: 900 seconds (15 minutes). Periodic tests use the current session MTU.
+# If every path is unavailable during session reconnect, compatible paths are
+# also revalidated before retrying session initialization.
+DNS_AUTO_RECHECK_INTERVAL_SECONDS = 900.0
+
+# Maximum domain/resolver pairs tested concurrently in the background.
+# Range: [1, 1024]. Shared by periodic, failure-triggered, and recovery checks.
+DNS_AUTO_RECHECK_PARALLELISM = 2
+
+# Spread periodic checks by +/- this percentage of the base interval.
+# Range: [0, 50]. 0 disables jitter; concurrency limits still apply.
+DNS_AUTO_RECHECK_JITTER_PERCENT = 10.0
+
+# Enable early rechecks after consecutive failures of the selected type.
+# Independent of DNS_AUTO_RECHECK_ENABLED and the resolver-health settings.
+DNS_AUTO_FAILURE_RECHECK_ENABLED = true
+
+# Consecutive failures required to trigger an early recheck. Range: [1, 10000].
+DNS_AUTO_FAILURE_THRESHOLD = 3
+
+# Minimum seconds between failure-triggered rechecks of the same path.
+# Range: [0, 86400]. 0 disables the cooldown; overlapping checks are still merged.
+DNS_AUTO_FAILURE_RECHECK_COOLDOWN_SECONDS = 30.0
+
+# Allow an emergency session restart with a smaller MTU ONLY if no path can
+# carry the current session MTU and a smaller working MTU has been verified.
+# Such a restart closes current streams. False forbids AUTO-triggered MTU
+# restarts; normal switches that support the current MTU remain possible.
+DNS_AUTO_ALLOW_MTU_RESTART = true
 
 # ------------------------------------------------------------------------------
 # 5) Compression

@@ -5,6 +5,8 @@ import (
 	"net"
 	"sort"
 	"time"
+
+	DnsParser "stormdns-go/internal/dnsparser"
 )
 
 const (
@@ -20,16 +22,20 @@ type resolverSampleKey struct {
 }
 
 type resolverSample struct {
-	serverKey  string
-	sentAt     time.Time
-	timedOut   bool
-	timedOutAt time.Time
-	evictAfter time.Time
+	queryType       uint16
+	queryGeneration uint64
+	serverKey       string
+	sentAt          time.Time
+	timedOut        bool
+	timedOutAt      time.Time
+	evictAfter      time.Time
 }
 
 type resolverTimeoutObservation struct {
-	serverKey string
-	at        time.Time
+	queryType       uint16
+	queryGeneration uint64
+	serverKey       string
+	at              time.Time
 }
 
 func (c *Client) resolverSampleTTL() time.Duration {
@@ -65,7 +71,7 @@ func (c *Client) noteResolverSuccess(serverKey string, rtt time.Duration) {
 	c.recordResolverHealthEvent(serverKey, true, c.now())
 }
 
-func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr string, serverKey string, sentAt time.Time) {
+func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr string, serverKey string, sentAt time.Time, generations ...uint64) {
 	if c == nil || len(packet) < 2 || resolverAddr == "" || serverKey == "" {
 		return
 	}
@@ -77,6 +83,19 @@ func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr
 	}
 
 	var timeoutObservations []resolverTimeoutObservation
+	var queryType uint16
+	var queryGeneration uint64
+	if c.autoQueryEnabled() {
+		if parsed, err := DnsParser.ParsePacketLite(packet); err == nil && parsed.HasQuestion {
+			queryType = parsed.FirstQuestion.Type
+			if current, ok := c.GetConnectionByKey(serverKey); ok && current.TunnelQueryType == queryType {
+				queryGeneration = current.QueryTypeGeneration
+				if len(generations) > 0 {
+					queryGeneration = generations[0]
+				}
+			}
+		}
+	}
 	c.resolverStatsMu.Lock()
 	if len(c.resolverPending) >= resolverPendingSoftCap {
 		timeoutObservations = c.pruneResolverSamplesLocked(sentAt)
@@ -85,6 +104,7 @@ func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr
 		}
 	}
 	c.resolverPending[key] = resolverSample{
+		queryType: queryType, queryGeneration: queryGeneration,
 		serverKey: serverKey,
 		sentAt:    sentAt,
 	}
@@ -92,6 +112,7 @@ func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr
 
 	for _, observation := range timeoutObservations {
 		c.noteResolverTimeout(observation.serverKey, observation.at)
+		c.noteAutoQueryOutcome(observation.serverKey, observation.queryType, observation.queryGeneration, false, observation.at)
 	}
 	c.noteResolverSend(serverKey)
 }
@@ -123,6 +144,7 @@ func (c *Client) trackResolverSuccess(packet []byte, addr *net.UDPAddr, localAdd
 	}
 
 	c.noteResolverSuccess(sample.serverKey, receivedAt.Sub(sample.sentAt))
+	c.noteAutoQueryOutcome(sample.serverKey, sample.queryType, sample.queryGeneration, true, receivedAt)
 }
 
 func (c *Client) trackResolverFailure(packet []byte, addr *net.UDPAddr, localAddr string, failedAt time.Time) {
@@ -151,6 +173,7 @@ func (c *Client) trackResolverFailure(packet []byte, addr *net.UDPAddr, localAdd
 	}
 
 	c.recordResolverHealthEvent(sample.serverKey, false, failedAt)
+	c.noteAutoQueryOutcome(sample.serverKey, sample.queryType, sample.queryGeneration, false, failedAt)
 }
 
 func (c *Client) collectExpiredResolverTimeouts(now time.Time) {
@@ -162,6 +185,7 @@ func (c *Client) collectExpiredResolverTimeouts(now time.Time) {
 	c.resolverStatsMu.Unlock()
 	for _, observation := range timeoutObservations {
 		c.noteResolverTimeout(observation.serverKey, observation.at)
+		c.noteAutoQueryOutcome(observation.serverKey, observation.queryType, observation.queryGeneration, false, observation.at)
 	}
 }
 
@@ -222,6 +246,7 @@ func (c *Client) pruneResolverSamplesLocked(now time.Time) []resolverTimeoutObse
 				c.resolverPending[key] = sample
 				if sample.serverKey != "" {
 					timeoutObservations = append(timeoutObservations, resolverTimeoutObservation{
+						queryType: sample.queryType, queryGeneration: sample.queryGeneration,
 						serverKey: sample.serverKey,
 						at:        sample.timedOutAt,
 					})
