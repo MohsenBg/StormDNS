@@ -56,9 +56,9 @@ func TestPickTunnelQueryTypeSRVMode(t *testing.T) {
 	}
 }
 
-func TestPickTunnelQueryTypeRotateMix(t *testing.T) {
+func TestPickTunnelQueryTypeRandomMix(t *testing.T) {
 	c := &Client{}
-	c.cfg.DNSQueryType = "ROTATE"
+	c.cfg.DNSQueryType = "RANDOM"
 	seen := map[uint16]bool{}
 	for i := 0; i < 400; i++ {
 		seen[c.pickTunnelQueryType()] = true
@@ -70,7 +70,7 @@ func TestPickTunnelQueryTypeRotateMix(t *testing.T) {
 		Enums.DNS_RECORD_TYPE_SRV,
 	} {
 		if !seen[want] {
-			t.Fatalf("ROTATE must produce type %d, got %v", want, seen)
+			t.Fatalf("RANDOM must produce type %d, got %v", want, seen)
 		}
 	}
 }

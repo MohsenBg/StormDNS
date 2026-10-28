@@ -110,8 +110,12 @@ func (c *Client) runResolverHealthLoop(ctx context.Context) {
 
 		now := c.now()
 		c.collectExpiredResolverTimeouts(now)
-		c.runResolverAutoDisable(now)
-		c.runResolverRecheckBatch(ctx, now)
+		if c.autoQueryEnabled() {
+			c.runAutoQueryChecks(ctx, now)
+		} else {
+			c.runResolverAutoDisable(now)
+			c.runResolverRecheckBatch(ctx, now)
+		}
 
 		waitFor := c.nextResolverHealthWait(now)
 		timer := time.NewTimer(waitFor)

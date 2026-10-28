@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // StormDNS
 // Author: nullroute1970
 // Github: https://github.com/nullroute1970/StormDNS
@@ -40,23 +40,27 @@ type Client struct {
 	codec    *security.Codec
 	balancer *Balancer
 
-	connections         []Connection
-	connectionsByKey    map[string]int
-	successMTUChecks    bool
-	udpBufferPool       sync.Pool
-	resolverConnsMu     sync.Mutex
-	resolverConns       map[string]chan pooledUDPConn
-	resolverAddrMu      sync.RWMutex
-	resolverAddrCache   map[string]*net.UDPAddr
-	resolverStatsMu     sync.RWMutex
-	resolverPending     map[resolverSampleKey]resolverSample
-	resolverHealthMu    sync.RWMutex
-	resolverHealth      map[string]*resolverHealthState
-	resolverRecheck     map[string]resolverRecheckState
-	runtimeDisabled     map[string]resolverDisabledState
-	resolverRecheckSem  chan struct{}
-	nowFn               func() time.Time
-	recheckConnectionFn func(conn *Connection) bool
+	connections          []Connection
+	connectionsByKey     map[string]int
+	successMTUChecks     bool
+	udpBufferPool        sync.Pool
+	resolverConnsMu      sync.Mutex
+	resolverConns        map[string]chan pooledUDPConn
+	resolverAddrMu       sync.RWMutex
+	resolverAddrCache    map[string]*net.UDPAddr
+	resolverStatsMu      sync.RWMutex
+	resolverPending      map[resolverSampleKey]resolverSample
+	resolverHealthMu     sync.RWMutex
+	resolverHealth       map[string]*resolverHealthState
+	resolverRecheck      map[string]resolverRecheckState
+	runtimeDisabled      map[string]resolverDisabledState
+	resolverRecheckSem   chan struct{}
+	nowFn                func() time.Time
+	recheckConnectionFn  func(conn *Connection) bool
+	autoQueryMu          sync.Mutex
+	autoQueryStates      map[string]*autoQueryState
+	autoQueryGeneration  uint64
+	autoMTURescanPending atomic.Bool
 
 	// MTU States
 	syncedUploadMTU                       int
@@ -176,9 +180,10 @@ type rawOutboundTask struct {
 }
 
 type encodedOutboundDatagram struct {
-	addr      *net.UDPAddr
-	serverKey string
-	packet    []byte
+	queryGeneration uint64
+	addr            *net.UDPAddr
+	serverKey       string
+	packet          []byte
 }
 
 type encodedOutboundTask struct {
@@ -190,16 +195,18 @@ type encodedOutboundTask struct {
 
 // Connection represents a unique domain-resolver pair with its associated metadata and MTU states.
 type Connection struct {
-	Domain           string
-	Resolver         string
-	ResolverPort     int
-	ResolverLabel    string
-	Key              string
-	IsValid          bool
-	UploadMTUBytes   int
-	UploadMTUChars   int
-	DownloadMTUBytes int
-	MTUResolveTime   time.Duration
+	Domain              string
+	Resolver            string
+	ResolverPort        int
+	ResolverLabel       string
+	Key                 string
+	IsValid             bool
+	UploadMTUBytes      int
+	UploadMTUChars      int
+	DownloadMTUBytes    int
+	MTUResolveTime      time.Duration
+	TunnelQueryType     uint16
+	QueryTypeGeneration uint64
 }
 
 // Bootstrap initializes a new Client by loading configuration, setting up logging,
@@ -423,7 +430,7 @@ func (c *Client) Run(ctx context.Context) error {
 		default:
 			if !c.successMTUChecks {
 				var mtuErr error
-				if c.connectionsHavePreknownMTU && !c.logBasedMTUVerify {
+				if c.connectionsHavePreknownMTU && !c.logBasedMTUVerify && !c.autoQueryEnabled() {
 					mtuErr = c.applyPreknownMTUsFromLog(ctx)
 					if mtuErr != nil {
 						if c.log != nil {
@@ -473,6 +480,15 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 
 			if !c.sessionReady {
+				if c.autoQueryEnabled() && c.balancer.ValidCount() == 0 {
+					c.recheckAutoPathsForSession(ctx)
+					if c.autoMTURescanPending.Swap(false) {
+						c.successMTUChecks = false
+						c.connectionsHavePreknownMTU = false
+						c.clearRuntimeResetRequest()
+						continue
+					}
+				}
 				retries := c.cfg.MTUTestRetries
 				if retries < 1 {
 					retries = 3
@@ -517,6 +533,10 @@ func (c *Client) Run(ctx context.Context) error {
 				return nil
 			case <-c.sessionResetSignal:
 				c.StopAsyncRuntime()
+				if c.autoMTURescanPending.Swap(false) {
+					c.successMTUChecks = false
+					c.connectionsHavePreknownMTU = false
+				}
 				c.resetSessionState(true)
 				c.clearRuntimeResetRequest()
 				sessionInitRetryFailures++

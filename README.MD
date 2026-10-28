@@ -187,7 +187,7 @@ DOMAINS = ["v.example.com"]
 
 If your DNS provider is Cloudflare, the `A` record for `ns.example.com` must be **DNS only**. It must not be proxied.
 
-**These same two records serve every tunnel query type — TXT, NS, CNAME, SRV, or a ROTATE mix. No extra DNS records are needed.** Delegation is type-agnostic: queries of any type for `v.example.com` or for names beneath it (payload-carrying tunnel names are always subdomains of the tunnel domain) are referred to `ns.example.com` and reach your server. The server answers each query with the same record type it was asked for (TXT questions get TXT answers, NS questions get NS answers, CNAME questions get CNAME answer chains, SRV questions get SRV answers, all with TTL 0), so resolvers never cache tunnel traffic.
+**These same two records serve every tunnel query type — TXT, NS, CNAME, SRV, or a RANDOM mix. No extra DNS records are needed.** Delegation is type-agnostic: queries of any type for `v.example.com` or for names beneath it (payload-carrying tunnel names are always subdomains of the tunnel domain) are referred to `ns.example.com` and reach your server. The server answers each query with the same record type it was asked for (TXT questions get TXT answers, NS questions get NS answers, CNAME questions get CNAME answer chains, SRV questions get SRV answers, all with TTL 0), so resolvers never cache tunnel traffic.
 
 `DNS_QUERY_TYPE` in the client config selects the record type used for tunnel queries:
 
@@ -197,9 +197,38 @@ If your DNS provider is Cloudflare, the `A` record for `ns.example.com` must be 
 | `"NS"` | Tunnel over NS queries/answers — use when a resolver or middlebox in your path drops or mangles TXT queries/answers |
 | `"CNAME"` | Tunnel over CNAME queries and CNAME answer chains — the most ordinary, web-like query shape; use when NS queries/answers look suspicious in your path |
 | `"SRV"` | Tunnel over SRV queries/answers — payload rides in the SRV target name and the priority/weight/port fields; use when the other record types are filtered |
-| `"ROTATE"` | Random TXT/NS/CNAME/SRV mix per query, so the stream does not look like a single-type DNS tunnel |
+| `"RANDOM"` | Random TXT/NS/CNAME/SRV mix per query, so the stream does not look like a single-type DNS tunnel |
+| `"AUTO"` | Test TXT/NS/CNAME/SRV separately for each domain/resolver path, choose reliability first and estimated speed second, and periodically re-evaluate |
 
-`"NS"`, `"CNAME"`, `"SRV"`, and `"ROTATE"` require a server running the same feature version. An older server answers NS, CNAME, and SRV tunnel queries with an empty response, which surfaces as repeated session-init retries — switch back to `"TXT"` if your server has not been updated.
+`"NS"`, `"CNAME"`, `"SRV"`, and `"RANDOM"` require a server running the same feature version. An older server answers NS, CNAME, and SRV tunnel queries with an empty response, which surfaces as repeated session-init retries — switch back to `"TXT"` if your server has not been updated.
+
+Set `DNS_QUERY_TYPE = "AUTO"` to run a full comparison of the configured candidate
+types before connecting. Each domain/resolver pair gets its own selected type
+and validated MTU. Unsupported types, empty DNS answers, and invalid probe replies
+do not qualify. AUTO can use a TXT-only server if TXT is among its candidates.
+Log-based startup still tests all candidates instead of trusting cached MTUs.
+
+The `DNS_AUTO_*` keys in `client_config.toml.simple` control adaptive selection and
+can also be overridden from the CLI. Defaults prioritize reliability before
+estimated speed, with a periodic recheck every 15 minutes and 10% jitter. The speed
+estimate measures verified probe bytes per round-trip time, not file-download
+throughput. Normal traffic failures trigger earlier checks independently of the
+periodic switch. Background checks share a configurable concurrency limit.
+
+Runtime switches use the current session MTU and keep streams open. When every
+compatible path is unavailable, AUTO may verify a smaller working MTU and request
+a session restart; that closes existing streams. Disable `DNS_AUTO_ALLOW_MTU_RESTART`
+to forbid these MTU restarts. If the runtime has already stopped for a session
+reconnect, AUTO still checks for paths compatible with the current MTU.
+
+The policy exposes the candidate types and tie-break order, probe count and
+timeout, minimum successful-round percentage, extra switch confirmation rounds,
+minimum speed improvement, periodic and failure-triggered recheck switches,
+interval, concurrency, jitter, consecutive-failure threshold, cooldown, and
+permission for emergency MTU restarts. Zero timeout inherits the active MTU-test
+timeout; zero confirmation rounds, jitter, or cooldown disables that feature.
+The existing `MIN/MAX_*_MTU` and `MTU_TEST_*` settings control discovery bounds,
+retries, and startup concurrency. See the sample for each key's limits and units.
 
 Short labels matter. A shorter domain leaves more room for payload inside the DNS query name, which is important on resolvers with tight limits.
 
@@ -420,6 +449,7 @@ The sample files are the source of truth for defaults and operational comments:
 | 🧦 Local proxy | `PROTOCOL_TYPE`, `LISTEN_IP`, `LISTEN_PORT`, `SOCKS5_AUTH`, `SOCKS5_USER`, `SOCKS5_PASS` |
 | 📛 Local DNS | `LOCAL_DNS_ENABLED`, `LOCAL_DNS_IP`, `LOCAL_DNS_PORT`, `LOCAL_DNS_CACHE_MAX_RECORDS`, `LOCAL_DNS_CACHE_TTL_SECONDS`, `LOCAL_DNS_PENDING_TIMEOUT_SECONDS`, `DNS_RESPONSE_FRAGMENT_TIMEOUT_SECONDS`, `LOCAL_DNS_CACHE_PERSIST_TO_FILE`, `LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS` |
 | 📡 Resolver/loss handling | `RESOLVER_BALANCING_STRATEGY`, `UPLOAD_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_PACKET_DUPLICATION_COUNT`, `UPLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `STREAM_RESOLVER_FAILOVER_RESEND_THRESHOLD`, `STREAM_RESOLVER_FAILOVER_COOLDOWN`, `RECHECK_INACTIVE_SERVERS_ENABLED`, `RECHECK_INACTIVE_INTERVAL_SECONDS`, `RECHECK_SERVER_INTERVAL_SECONDS`, `RECHECK_BATCH_SIZE`, `AUTO_DISABLE_TIMEOUT_SERVERS`, `AUTO_DISABLE_TIMEOUT_WINDOW_SECONDS`, `AUTO_DISABLE_MIN_OBSERVATIONS`, `AUTO_DISABLE_CHECK_INTERVAL_SECONDS`, `BASE_ENCODE_DATA`, `DNS_QUERY_TYPE` |
+| Adaptive query-type policy | `DNS_AUTO_QUERY_TYPES`, `DNS_AUTO_PROBE_COUNT`, `DNS_AUTO_PROBE_TIMEOUT_SECONDS`, `DNS_AUTO_MIN_SUCCESS_PERCENT`, `DNS_AUTO_SWITCH_CONFIRMATION_COUNT`, `DNS_AUTO_MIN_SPEED_IMPROVEMENT_PERCENT`, `DNS_AUTO_RECHECK_ENABLED`, `DNS_AUTO_RECHECK_INTERVAL_SECONDS`, `DNS_AUTO_RECHECK_PARALLELISM`, `DNS_AUTO_RECHECK_JITTER_PERCENT`, `DNS_AUTO_FAILURE_RECHECK_ENABLED`, `DNS_AUTO_FAILURE_THRESHOLD`, `DNS_AUTO_FAILURE_RECHECK_COOLDOWN_SECONDS`, `DNS_AUTO_ALLOW_MTU_RESTART` |
 | 📦 Compression | `UPLOAD_COMPRESSION_TYPE`, `DOWNLOAD_COMPRESSION_TYPE`, `COMPRESSION_MIN_SIZE` |
 | 📏 MTU discovery | `MIN_UPLOAD_MTU`, `MIN_DOWNLOAD_MTU`, `MAX_UPLOAD_MTU`, `MAX_DOWNLOAD_MTU`, `MTU_TEST_RETRIES_RESOLVERS`, `MTU_TEST_TIMEOUT_RESOLVERS`, `MTU_TEST_PARALLELISM_RESOLVERS`, `MTU_TEST_RETRIES_LOGS`, `MTU_TEST_TIMEOUT_LOGS`, `MTU_TEST_PARALLELISM_LOGS` |
 | ⚙️ Workers/queues/timers | `RX_TX_WORKERS`, `TUNNEL_PROCESS_WORKERS`, `TUNNEL_PACKET_TIMEOUT_SECONDS`, `DISPATCHER_IDLE_POLL_INTERVAL_SECONDS`, `TX_CHANNEL_SIZE`, `RX_CHANNEL_SIZE`, `RESOLVER_UDP_CONNECTION_POOL_SIZE`, `STREAM_QUEUE_INITIAL_CAPACITY`, `ORPHAN_QUEUE_INITIAL_CAPACITY`, `DNS_RESPONSE_FRAGMENT_STORE_CAPACITY`, `SOCKS_UDP_ASSOCIATE_READ_TIMEOUT_SECONDS`, `CLIENT_TERMINAL_STREAM_RETENTION_SECONDS`, `CLIENT_CANCELLED_SETUP_RETENTION_SECONDS` |
